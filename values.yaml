@@ -1,0 +1,223 @@
+# ──────────────────────────────────────────────────────────────
+# GitLab Helm Chart — self-hosted values
+# Chart: https://charts.gitlab.io/  (gitlab/gitlab)
+#
+# Replace every occurrence of "example.com" with your real domain.
+# Replace "your-email@example.com" with your real email (Let's Encrypt).
+# Set global.hosts.externalIP to the public IP of your node.
+# ──────────────────────────────────────────────────────────────
+
+global:
+  # ── Domains ──────────────────────────────────────────────────
+  hosts:
+    domain: example.com          # GitLab will live at gitlab.example.com
+    https: true
+    externalIP: ""               # Public IP of the Kubernetes node
+
+  # ── Ingress ──────────────────────────────────────────────────
+  ingress:
+    configureCertmanager: true   # Cert-manager issues Let's Encrypt certs
+    class: gitlab-nginx
+    annotations:
+      kubernetes.io/tls-acme: "true"
+
+  # ── Cert-manager / ACME ──────────────────────────────────────
+  certmanager:
+    install: true
+
+  # ── Time zone ─────────────────────────────────────────────────
+  time_zone: UTC
+
+  # ── GitLab edition ────────────────────────────────────────────
+  # ce = Community Edition (free), ee = Enterprise Edition
+  edition: ce
+
+  # ── Email (SMTP) ──────────────────────────────────────────────
+  # Set enabled: true and fill the fields to send email from GitLab.
+  smtp:
+    enabled: false
+    # address: smtp.gmail.com
+    # port: 587
+    # user_name: "user@gmail.com"
+    # password:
+    #   secret: gitlab-smtp-password
+    #   key: password
+    # authentication: plain
+    # starttls_auto: true
+
+  email:
+    display_name: GitLab
+    from: ""
+    reply_to: ""
+
+  # ── Object storage — MinIO (bundled) ─────────────────────────
+  minio:
+    enabled: true
+
+  # ── KAS (GitLab Agent Server) — optional ──────────────────────
+  kas:
+    enabled: false
+
+  # ── Spamcheck — optional ──────────────────────────────────────
+  spamcheck:
+    enabled: false
+
+  # ── Shell / SSH port ─────────────────────────────────────────
+  shell:
+    port: 22
+
+  # ── Monitoring ───────────────────────────────────────────────
+  # Prometheus is bundled but disabled here to save resources.
+  # Enable and expose metrics for production.
+  monitoring:
+    enabled: false
+
+# ── Let's Encrypt issuer ──────────────────────────────────────
+certmanager-issuer:
+  email: your-email@example.com  # Must be a valid email for ACME
+
+# ── nginx-ingress (bundled) ───────────────────────────────────
+nginx-ingress:
+  enabled: true
+  controller:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    service:
+      type: LoadBalancer
+      # If your node has no cloud LoadBalancer, use NodePort instead:
+      # type: NodePort
+      # nodePorts:
+      #   http: 80
+      #   https: 443
+
+# ── GitLab application components ────────────────────────────
+gitlab:
+  # Webservice (Rails app / Puma)
+  webservice:
+    minReplicas: 1
+    maxReplicas: 1
+    workerProcesses: 2
+    resources:
+      requests:
+        cpu: 300m
+        memory: 1.5G
+      limits:
+        memory: 3G
+
+  # Sidekiq (background jobs)
+  sidekiq:
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1G
+
+  # Gitaly (Git storage)
+  gitaly:
+    persistence:
+      enabled: true
+      size: 50Gi
+      # storageClass: ""   # Defaults to cluster default StorageClass
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+
+  # Toolbox (backup/restore, admin tasks)
+  toolbox:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 100Mi
+
+  # GitLab Shell (SSH access)
+  gitlab-shell:
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  # Migrations (runs once at install/upgrade)
+  migrations:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+# ── Container Registry ────────────────────────────────────────
+registry:
+  enabled: true
+  hpa:
+    minReplicas: 1
+    maxReplicas: 1
+  storage:
+    secret: gitlab-registry-storage
+    key: config
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+# ── PostgreSQL (bundled Bitnami chart) ────────────────────────
+postgresql:
+  install: true
+  auth:
+    password: ""          # Auto-generated if empty
+    postgresPassword: ""  # Auto-generated if empty
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+
+# ── Redis (bundled Bitnami chart) ─────────────────────────────
+redis:
+  install: true
+  auth:
+    enabled: true
+    password: ""          # Auto-generated if empty
+  master:
+    persistence:
+      enabled: true
+      size: 5Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+# ── MinIO (bundled object storage) ───────────────────────────
+minio:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# ── GitLab Runner (optional) ──────────────────────────────────
+# Enables CI/CD pipelines on this same cluster.
+# Set enabled: true to deploy a runner alongside GitLab.
+gitlab-runner:
+  enabled: false
+  # rbac:
+  #   create: true
+  # runners:
+  #   config: |
+  #     [[runners]]
+  #       [runners.kubernetes]
+  #         namespace = "{{.Release.Namespace}}"
+  #         image = "ubuntu:22.04"
