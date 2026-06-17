@@ -174,4 +174,14 @@ gitlab-runner:
           image = "ubuntu:22.04"
 ```
 
+---
+
+## Author
+
+**rejRoky** — [github.com/rejRoky](https://github.com/rejRoky)
+
+## License
+
+[MIT](LICENSE) © 2026 rejRoky
+
 Then run `./deploy.sh ... --upgrade`.
