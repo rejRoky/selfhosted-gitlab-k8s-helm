@@ -2,37 +2,37 @@
 # GitLab Helm — LOCAL / OFFLINE values
 #
 # Use this when you have NO public domain or public IP.
-# Access GitLab via NodePort on the machine's LAN IP.
-# TLS is self-signed (browser will show a warning — that's OK
-# for local use).
+# Prerequisites: run ./deploy-deps.sh first to provision
+#   PostgreSQL, Redis, and MinIO as external services.
 #
 # Usage:
 #   ./deploy.sh --domain my.lan --ip 192.168.1.10 \
 #               --email admin@local.lan \
 #               --values-file values-local.yaml
 #
-# Add to /etc/hosts on any client machine:
+# Add to /etc/hosts on any client:
 #   192.168.1.10  gitlab.my.lan registry.my.lan minio.my.lan
 # ──────────────────────────────────────────────────────────────
 
 global:
   hosts:
-    domain: my.lan            # Change to your LAN hostname or hostname.local
+    domain: my.lan
     https: true
-    externalIP: ""            # Set to your machine's LAN IP, e.g. 192.168.1.10
+    externalIP: ""              # Set via --set or --ip flag in deploy.sh
 
   ingress:
-    configureCertmanager: false   # No Let's Encrypt for local install
+    configureCertmanager: false
     class: gitlab-nginx
     tls:
       enabled: true
       secretName: gitlab-tls-self-signed
 
-  # Disable cert-manager; we use a self-signed cert secret
   certmanager:
     install: false
 
-  # No SMTP needed for local dev
+  time_zone: UTC
+  edition: ce
+
   smtp:
     enabled: false
 
@@ -41,20 +41,69 @@ global:
     from: "gitlab@my.lan"
     reply_to: ""
 
-  minio:
-    enabled: true
-
   kas:
     enabled: false
-
   spamcheck:
     enabled: false
 
   shell:
-    port: 2222              # Avoid needing root for port 22 in NodePort mode
+    port: 32222    # Must be in NodePort range (30000-32767) for minikube
 
   monitoring:
     enabled: false
+
+  # ── External PostgreSQL (deployed by deploy-deps.sh) ─────────
+  psql:
+    host: gitlab-postgresql
+    port: 5432
+    username: gitlab
+    database: gitlabhq_production
+    password:
+      secret: gitlab-postgresql
+      key: password
+
+  # ── External Redis (deployed by deploy-deps.sh) ──────────────
+  redis:
+    host: gitlab-redis-master
+    auth:
+      enabled: true
+      secret: gitlab-redis
+      key: redis-password
+
+  # ── External object storage — MinIO (deployed by deploy-deps.sh)
+  appConfig:
+    # Consolidated object storage — individual items inherit this connection
+    object_store:
+      enabled: true
+      proxy_download: true
+      connection:
+        secret: gitlab-object-store
+        key: connection
+    lfs:
+      bucket: gitlab-lfs
+    artifacts:
+      bucket: gitlab-artifacts
+    uploads:
+      bucket: gitlab-uploads
+    packages:
+      bucket: gitlab-packages
+    backups:
+      bucket: gitlab-backup
+      tmpBucket: gitlab-tmp
+      # Backups require their own connection reference
+      connection:
+        secret: gitlab-object-store
+        key: connection
+
+# ── Disable removed bundled components ───────────────────────
+postgresql:
+  install: false
+
+redis:
+  install: false
+
+minio:
+  enabled: false
 
 # ── nginx-ingress — NodePort (no cloud LoadBalancer) ─────────
 nginx-ingress:
@@ -70,12 +119,22 @@ nginx-ingress:
       nodePorts:
         http: 30080
         https: 30443
-    # Allow ports < 1024 in the container (needed for ssh shell)
-    containerPort:
-      http: 8080
-      https: 8443
 
-# ── GitLab components (single-replica, minimal resources) ────
+# ── Container Registry ────────────────────────────────────────
+registry:
+  enabled: true
+  hpa:
+    minReplicas: 1
+    maxReplicas: 1
+  storage:
+    secret: gitlab-registry-storage
+    key: config
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+# ── GitLab application components ────────────────────────────
 gitlab:
   webservice:
     minReplicas: 1
@@ -109,6 +168,11 @@ gitlab:
 
   toolbox:
     replicas: 1
+    backups:
+      objectStorage:
+        config:
+          secret: gitlab-object-store
+          key: connection
     resources:
       requests:
         cpu: 50m
@@ -117,9 +181,6 @@ gitlab:
   gitlab-shell:
     minReplicas: 1
     maxReplicas: 1
-    service:
-      type: NodePort
-      nodePort: 32222    # SSH clone: git clone ssh://git@<IP>:32222/group/repo.git
     resources:
       requests:
         cpu: 100m
@@ -131,49 +192,6 @@ gitlab:
         cpu: 100m
         memory: 256Mi
 
-registry:
-  enabled: true
-  hpa:
-    minReplicas: 1
-    maxReplicas: 1
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-
-postgresql:
-  install: true
-  primary:
-    persistence:
-      enabled: true
-      size: 8Gi
-    resources:
-      requests:
-        cpu: 200m
-        memory: 256Mi
-
-redis:
-  install: true
-  auth:
-    enabled: true
-  master:
-    persistence:
-      enabled: true
-      size: 5Gi
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-
-minio:
-  enabled: true
-  persistence:
-    enabled: true
-    size: 10Gi
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-
+# ── GitLab Runner (optional) ──────────────────────────────────
 gitlab-runner:
   enabled: false

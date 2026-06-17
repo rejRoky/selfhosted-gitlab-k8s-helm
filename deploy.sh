@@ -18,6 +18,7 @@ CHART_VERSION=""          # Pin to a specific chart version, e.g. "8.11.2"
 TIMEOUT="600s"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VALUES_FILE="${SCRIPT_DIR}/values.yaml"
+MINIKUBE_PROFILE="gitlab"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()    { echo -e "${GREEN}[INFO]${NC}  $*"; }
@@ -69,9 +70,10 @@ prompt_if_empty EMAIL       "Email for Let's Encrypt ACME"
 
 # ── Prerequisite checks ───────────────────────────────────────
 step "Checking prerequisites"
-command -v kubectl &>/dev/null || error "kubectl not found. Run ./install-tools.sh first."
-command -v helm    &>/dev/null || error "helm not found. Run ./install-tools.sh first."
-kubectl cluster-info &>/dev/null        || error "Cannot reach Kubernetes cluster. Check KUBECONFIG."
+command -v kubectl   &>/dev/null || error "kubectl not found. Run ./install-tools.sh first."
+command -v helm      &>/dev/null || error "helm not found. Run ./install-tools.sh first."
+command -v minikube  &>/dev/null || error "minikube not found. Run ./install-tools.sh first."
+kubectl cluster-info &>/dev/null        || error "Cannot reach Kubernetes cluster. Run ./install-tools.sh first."
 [[ -f "$VALUES_FILE" ]]                 || error "values.yaml not found at $VALUES_FILE"
 
 info "Kubernetes cluster: $(kubectl config current-context)"
@@ -119,10 +121,13 @@ fi
 step "Deployment complete"
 
 echo ""
-info "DNS records to create (A records):"
-echo "  gitlab.${DOMAIN}    →  ${EXTERNAL_IP}"
-echo "  registry.${DOMAIN}  →  ${EXTERNAL_IP}"
-echo "  minio.${DOMAIN}     →  ${EXTERNAL_IP}"
+info "DNS / hosts entries to create:"
+echo "  ${EXTERNAL_IP}  gitlab.${DOMAIN}"
+echo "  ${EXTERNAL_IP}  registry.${DOMAIN}"
+echo "  ${EXTERNAL_IP}  minio.${DOMAIN}"
+echo ""
+info "Add the lines above to /etc/hosts (or run minikube tunnel for LoadBalancer IPs):"
+echo "  sudo sh -c \"echo '${EXTERNAL_IP}  gitlab.${DOMAIN} registry.${DOMAIN} minio.${DOMAIN}' >> /etc/hosts\""
 echo ""
 
 info "Fetching initial root password..."

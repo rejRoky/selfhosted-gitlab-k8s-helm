@@ -1,6 +1,9 @@
 # ──────────────────────────────────────────────────────────────
-# GitLab Helm Chart — self-hosted values
+# GitLab Helm Chart — self-hosted production values
 # Chart: https://charts.gitlab.io/  (gitlab/gitlab)
+#
+# Prerequisites: run ./deploy-deps.sh first to provision
+#   PostgreSQL, Redis, and MinIO as external services.
 #
 # Replace every occurrence of "example.com" with your real domain.
 # Replace "your-email@example.com" with your real email (Let's Encrypt).
@@ -16,7 +19,7 @@ global:
 
   # ── Ingress ──────────────────────────────────────────────────
   ingress:
-    configureCertmanager: true   # Cert-manager issues Let's Encrypt certs
+    configureCertmanager: true
     class: gitlab-nginx
     annotations:
       kubernetes.io/tls-acme: "true"
@@ -25,15 +28,10 @@ global:
   certmanager:
     install: true
 
-  # ── Time zone ─────────────────────────────────────────────────
   time_zone: UTC
-
-  # ── GitLab edition ────────────────────────────────────────────
-  # ce = Community Edition (free), ee = Enterprise Edition
   edition: ce
 
   # ── Email (SMTP) ──────────────────────────────────────────────
-  # Set enabled: true and fill the fields to send email from GitLab.
   smtp:
     enabled: false
     # address: smtp.gmail.com
@@ -50,31 +48,72 @@ global:
     from: ""
     reply_to: ""
 
-  # ── Object storage — MinIO (bundled) ─────────────────────────
-  minio:
-    enabled: true
-
-  # ── KAS (GitLab Agent Server) — optional ──────────────────────
   kas:
     enabled: false
-
-  # ── Spamcheck — optional ──────────────────────────────────────
   spamcheck:
     enabled: false
 
-  # ── Shell / SSH port ─────────────────────────────────────────
   shell:
     port: 22
 
-  # ── Monitoring ───────────────────────────────────────────────
-  # Prometheus is bundled but disabled here to save resources.
-  # Enable and expose metrics for production.
   monitoring:
     enabled: false
 
+  # ── External PostgreSQL (deployed by deploy-deps.sh) ─────────
+  psql:
+    host: gitlab-postgresql
+    port: 5432
+    username: gitlab
+    database: gitlabhq_production
+    password:
+      secret: gitlab-postgresql
+      key: password
+
+  # ── External Redis (deployed by deploy-deps.sh) ──────────────
+  redis:
+    host: gitlab-redis-master
+    auth:
+      enabled: true
+      secret: gitlab-redis
+      key: redis-password
+
+  # ── External object storage — MinIO (deployed by deploy-deps.sh)
+  appConfig:
+    # Consolidated object storage — individual items inherit this connection
+    object_store:
+      enabled: true
+      proxy_download: true
+      connection:
+        secret: gitlab-object-store
+        key: connection
+    lfs:
+      bucket: gitlab-lfs
+    artifacts:
+      bucket: gitlab-artifacts
+    uploads:
+      bucket: gitlab-uploads
+    packages:
+      bucket: gitlab-packages
+    backups:
+      bucket: gitlab-backup
+      tmpBucket: gitlab-tmp
+      connection:
+        secret: gitlab-object-store
+        key: connection
+
 # ── Let's Encrypt issuer ──────────────────────────────────────
 certmanager-issuer:
-  email: your-email@example.com  # Must be a valid email for ACME
+  email: your-email@example.com
+
+# ── Disable removed bundled components ───────────────────────
+postgresql:
+  install: false
+
+redis:
+  install: false
+
+minio:
+  enabled: false
 
 # ── nginx-ingress (bundled) ───────────────────────────────────
 nginx-ingress:
@@ -87,71 +126,6 @@ nginx-ingress:
         memory: 128Mi
     service:
       type: LoadBalancer
-      # If your node has no cloud LoadBalancer, use NodePort instead:
-      # type: NodePort
-      # nodePorts:
-      #   http: 80
-      #   https: 443
-
-# ── GitLab application components ────────────────────────────
-gitlab:
-  # Webservice (Rails app / Puma)
-  webservice:
-    minReplicas: 1
-    maxReplicas: 1
-    workerProcesses: 2
-    resources:
-      requests:
-        cpu: 300m
-        memory: 1.5G
-      limits:
-        memory: 3G
-
-  # Sidekiq (background jobs)
-  sidekiq:
-    minReplicas: 1
-    maxReplicas: 1
-    resources:
-      requests:
-        cpu: 100m
-        memory: 512Mi
-      limits:
-        memory: 1G
-
-  # Gitaly (Git storage)
-  gitaly:
-    persistence:
-      enabled: true
-      size: 50Gi
-      # storageClass: ""   # Defaults to cluster default StorageClass
-    resources:
-      requests:
-        cpu: 100m
-        memory: 200Mi
-
-  # Toolbox (backup/restore, admin tasks)
-  toolbox:
-    replicas: 1
-    resources:
-      requests:
-        cpu: 50m
-        memory: 100Mi
-
-  # GitLab Shell (SSH access)
-  gitlab-shell:
-    minReplicas: 1
-    maxReplicas: 1
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-
-  # Migrations (runs once at install/upgrade)
-  migrations:
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
 
 # ── Container Registry ────────────────────────────────────────
 registry:
@@ -167,50 +141,65 @@ registry:
       cpu: 50m
       memory: 128Mi
 
-# ── PostgreSQL (bundled Bitnami chart) ────────────────────────
-postgresql:
-  install: true
-  auth:
-    password: ""          # Auto-generated if empty
-    postgresPassword: ""  # Auto-generated if empty
-  primary:
-    persistence:
-      enabled: true
-      size: 8Gi
+# ── GitLab application components ────────────────────────────
+gitlab:
+  webservice:
+    minReplicas: 1
+    maxReplicas: 1
+    workerProcesses: 2
     resources:
       requests:
-        cpu: 200m
-        memory: 256Mi
+        cpu: 300m
+        memory: 1.5G
+      limits:
+        memory: 3G
 
-# ── Redis (bundled Bitnami chart) ─────────────────────────────
-redis:
-  install: true
-  auth:
-    enabled: true
-    password: ""          # Auto-generated if empty
-  master:
+  sidekiq:
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1G
+
+  gitaly:
     persistence:
       enabled: true
-      size: 5Gi
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+
+  toolbox:
+    replicas: 1
+    backups:
+      objectStorage:
+        config:
+          secret: gitlab-object-store
+          key: connection
+    resources:
+      requests:
+        cpu: 50m
+        memory: 100Mi
+
+  gitlab-shell:
+    minReplicas: 1
+    maxReplicas: 1
     resources:
       requests:
         cpu: 100m
         memory: 128Mi
 
-# ── MinIO (bundled object storage) ───────────────────────────
-minio:
-  enabled: true
-  persistence:
-    enabled: true
-    size: 10Gi
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
+  migrations:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
 
 # ── GitLab Runner (optional) ──────────────────────────────────
-# Enables CI/CD pipelines on this same cluster.
-# Set enabled: true to deploy a runner alongside GitLab.
 gitlab-runner:
   enabled: false
   # rbac:
